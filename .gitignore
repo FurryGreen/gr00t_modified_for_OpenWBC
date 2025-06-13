@@ -1,6 +1,10 @@
 # C extensions
 *.so
 
+# new data files
+save
+test_fig.png
+
 # Distribution / packaging
 .Python
 build/

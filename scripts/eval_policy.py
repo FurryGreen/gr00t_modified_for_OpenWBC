@@ -58,7 +58,7 @@ class ArgsConfig:
     data_config: Literal[tuple(DATA_CONFIG_MAP.keys())] = "fourier_gr1_arms_only"
     """Data config to use."""
 
-    steps: int = 150
+    steps: int = 300
     """Number of steps to evaluate."""
 
     trajs: int = 1

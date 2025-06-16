@@ -130,7 +130,7 @@ def calc_mse_for_single_trajectory(
             ax.legend()
 
         plt.tight_layout()
-        plt.savefig('test_fig.png')
+        plt.savefig(f'test_mul_pink_fox_{modality_keys[0]}.png')
         plt.show()
 
     return mse

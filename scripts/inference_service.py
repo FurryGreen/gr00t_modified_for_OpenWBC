@@ -111,6 +111,7 @@ def main(args: ArgsConfig):
         # - action: action.left_hand: (16, 6)
         # - action: action.right_hand: (16, 6)
         # - action: action.waist: (16, 3)
+        #### 我猜这里都是未被归一化的数据
         obs = {
             "video.ego_view": np.random.randint(0, 256, (1, 256, 256, 3), dtype=np.uint8),
             "state.left_arm": np.random.rand(1, 7),

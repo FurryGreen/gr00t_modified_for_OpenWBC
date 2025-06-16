@@ -3,7 +3,7 @@
 
 # new data files
 save
-test_*.png
+*.png
 
 # Distribution / packaging
 .Python

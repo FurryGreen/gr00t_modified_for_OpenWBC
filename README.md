@@ -161,11 +161,17 @@ python scripts/eval_policy.py \
 
 ## 🤖 实机推理（测试中，还不知道咋用）
 
-```bash
-# 启动服务端
-python scripts/inference_service.py --model_path ../models/GR00T-N1.5-3B --server
+Gr00t的G1部署：待测试
+#### 先启动Homie
 
-# 启动客户端
-python scripts/inference_service.py --client
+#### 启动图像server
+```bash
+cd inference_deploys/image_server
+python image_server.py
 ```
+#### 启动模型server
+```bash
+python scripts/G1_inference.py --arm=G1_29 --hand=dex3 --model_path <your model path> --goal pick_pink_fox
+```
+
 

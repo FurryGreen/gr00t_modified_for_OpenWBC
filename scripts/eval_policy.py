@@ -104,7 +104,7 @@ def main(args: ArgsConfig):
 
     # Get the supported modalities for the policy
     modality = policy.get_modality_config()
-    print("Current modality config: \n", modality)
+    print("Current modality config: \n", modality['action'].modality_keys)
 
     # Create the dataset
     dataset = LeRobotSingleDataset(

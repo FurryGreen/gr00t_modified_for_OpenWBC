@@ -4,6 +4,7 @@
 # new data files
 save
 *.png
+out_model/*
 
 # Distribution / packaging
 .Python
@@ -126,3 +127,11 @@ playground/
 demo_data/gr00t-gr1-apple-to-shelf/
 tmp/
 output/
+our_model/model-00001-of-00002.safetensors
+our_model/model-00002-of-00002.safetensors
+our_model/model.safetensors.index.json
+our_model/training_args.bin
+our_model/config.json
+our_model/trainer_state.json
+.gitignore
+our_model/experiment_cfg/metadata.json

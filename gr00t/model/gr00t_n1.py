@@ -191,7 +191,6 @@ class GR00T_N1_5(PreTrainedModel):
             else:
                 # Keep original dtype
                 return x.to(self.device)
-
         backbone_inputs = tree.map_structure(to_device_with_maybe_dtype, backbone_inputs)
         action_inputs = tree.map_structure(to_device_with_maybe_dtype, action_inputs)
         return backbone_inputs, action_inputs
@@ -215,7 +214,8 @@ class GR00T_N1_5(PreTrainedModel):
             # saved in ~/.cache/huggingface/hub/
             local_model_path = snapshot_download(pretrained_model_name_or_path, repo_type="model")
             # HFValidationError, RepositoryNotFoundError
-        except (HFValidationError, RepositoryNotFoundError):
+        # except (HFValidationError, RepositoryNotFoundError):
+        except:
             print(
                 f"Model not found or avail in the huggingface hub. Loading from local path: {pretrained_model_name_or_path}"
             )

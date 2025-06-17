@@ -17,8 +17,8 @@ from multiprocessing import Process, shared_memory, Array, Lock
 
 parent2_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(parent2_dir)
-from teleop.robot_control.hand_retargeting import HandRetargeting, HandType
-from teleop.utils.weighted_moving_filter import WeightedMovingFilter
+# from teleop.robot_control.hand_retargeting import HandRetargeting, HandType
+# from teleop.utils.weighted_moving_filter import WeightedMovingFilter
 
 
 unitree_tip_indices = [4, 9, 14] # [thumb, index, middle] in OpenXR
@@ -53,11 +53,11 @@ class Dex3_1_Controller:
 
         self.fps = fps
         self.Unit_Test = Unit_Test
-        if not self.Unit_Test:
-            self.hand_retargeting = HandRetargeting(HandType.UNITREE_DEX3)
-        else:
-            self.hand_retargeting = HandRetargeting(HandType.UNITREE_DEX3_Unit_Test)
-            ChannelFactoryInitialize(0)
+        # if not self.Unit_Test:
+        #     self.hand_retargeting = HandRetargeting(HandType.UNITREE_DEX3)
+        # else:
+        #     self.hand_retargeting = HandRetargeting(HandType.UNITREE_DEX3_Unit_Test)
+        #     ChannelFactoryInitialize(0)
 
         # initialize handcmd publisher and handstate subscriber
         self.LeftHandCmb_publisher = ChannelPublisher(kTopicDex3LeftCommand, HandCmd_)
@@ -84,6 +84,37 @@ class Dex3_1_Controller:
                 break
             time.sleep(0.01)
             print("[Dex3_1_Controller] Waiting to subscribe dds...")
+
+        #### msg initialize
+        q = 0.0
+        dq = 0.0
+        tau = 0.0
+        kp = 1.5
+        kd = 0.2
+
+        # initialize dex3-1's left hand cmd msg
+        self.left_msg  = unitree_hg_msg_dds__HandCmd_()
+        for id in Dex3_1_Left_JointIndex:
+            ris_mode = self._RIS_Mode(id = id, status = 0x01)
+            motor_mode = ris_mode._mode_to_uint8()
+            self.left_msg.motor_cmd[id].mode = motor_mode
+            self.left_msg.motor_cmd[id].q    = q
+            self.left_msg.motor_cmd[id].dq   = dq
+            self.left_msg.motor_cmd[id].tau  = tau
+            self.left_msg.motor_cmd[id].kp   = kp
+            self.left_msg.motor_cmd[id].kd   = kd
+
+        # initialize dex3-1's right hand cmd msg
+        self.right_msg = unitree_hg_msg_dds__HandCmd_()
+        for id in Dex3_1_Right_JointIndex:
+            ris_mode = self._RIS_Mode(id = id, status = 0x01)
+            motor_mode = ris_mode._mode_to_uint8()
+            self.right_msg.motor_cmd[id].mode = motor_mode  
+            self.right_msg.motor_cmd[id].q    = q
+            self.right_msg.motor_cmd[id].dq   = dq
+            self.right_msg.motor_cmd[id].tau  = tau
+            self.right_msg.motor_cmd[id].kp   = kp
+            self.right_msg.motor_cmd[id].kd   = kd
 
         hand_control_process = Process(target=self.control_process, args=(left_hand_array, right_hand_array,  self.left_hand_state_array, self.right_hand_state_array,
                                                                           dual_hand_data_lock, dual_hand_state_array, dual_hand_action_array))
@@ -136,67 +167,66 @@ class Dex3_1_Controller:
         left_q_target  = np.full(Dex3_Num_Motors, 0)
         right_q_target = np.full(Dex3_Num_Motors, 0)
 
-        q = 0.0
-        dq = 0.0
-        tau = 0.0
-        kp = 1.5
-        kd = 0.2
+        # q = 0.0
+        # dq = 0.0
+        # tau = 0.0
+        # kp = 1.5
+        # kd = 0.2
 
-        # initialize dex3-1's left hand cmd msg
-        self.left_msg  = unitree_hg_msg_dds__HandCmd_()
-        for id in Dex3_1_Left_JointIndex:
-            ris_mode = self._RIS_Mode(id = id, status = 0x01)
-            motor_mode = ris_mode._mode_to_uint8()
-            self.left_msg.motor_cmd[id].mode = motor_mode
-            self.left_msg.motor_cmd[id].q    = q
-            self.left_msg.motor_cmd[id].dq   = dq
-            self.left_msg.motor_cmd[id].tau  = tau
-            self.left_msg.motor_cmd[id].kp   = kp
-            self.left_msg.motor_cmd[id].kd   = kd
+        # # initialize dex3-1's left hand cmd msg
+        # self.left_msg  = unitree_hg_msg_dds__HandCmd_()
+        # for id in Dex3_1_Left_JointIndex:
+        #     ris_mode = self._RIS_Mode(id = id, status = 0x01)
+        #     motor_mode = ris_mode._mode_to_uint8()
+        #     self.left_msg.motor_cmd[id].mode = motor_mode
+        #     self.left_msg.motor_cmd[id].q    = q
+        #     self.left_msg.motor_cmd[id].dq   = dq
+        #     self.left_msg.motor_cmd[id].tau  = tau
+        #     self.left_msg.motor_cmd[id].kp   = kp
+        #     self.left_msg.motor_cmd[id].kd   = kd
 
-        # initialize dex3-1's right hand cmd msg
-        self.right_msg = unitree_hg_msg_dds__HandCmd_()
-        for id in Dex3_1_Right_JointIndex:
-            ris_mode = self._RIS_Mode(id = id, status = 0x01)
-            motor_mode = ris_mode._mode_to_uint8()
-            self.right_msg.motor_cmd[id].mode = motor_mode  
-            self.right_msg.motor_cmd[id].q    = q
-            self.right_msg.motor_cmd[id].dq   = dq
-            self.right_msg.motor_cmd[id].tau  = tau
-            self.right_msg.motor_cmd[id].kp   = kp
-            self.right_msg.motor_cmd[id].kd   = kd  
+        # # initialize dex3-1's right hand cmd msg
+        # self.right_msg = unitree_hg_msg_dds__HandCmd_()
+        # for id in Dex3_1_Right_JointIndex:
+        #     ris_mode = self._RIS_Mode(id = id, status = 0x01)
+        #     motor_mode = ris_mode._mode_to_uint8()
+        #     self.right_msg.motor_cmd[id].mode = motor_mode  
+        #     self.right_msg.motor_cmd[id].q    = q
+        #     self.right_msg.motor_cmd[id].dq   = dq
+        #     self.right_msg.motor_cmd[id].tau  = tau
+        #     self.right_msg.motor_cmd[id].kp   = kp
+        #     self.right_msg.motor_cmd[id].kd   = kd  
 
         try:
             while self.running:
                 start_time = time.time()
-                # get dual hand state
-                left_hand_mat  = np.array(left_hand_array[:]).reshape(25, 3).copy()
-                right_hand_mat = np.array(right_hand_array[:]).reshape(25, 3).copy()
+                # # get dual hand state
+                # left_hand_mat  = np.array(left_hand_array[:]).reshape(25, 3).copy()
+                # right_hand_mat = np.array(right_hand_array[:]).reshape(25, 3).copy()
 
-                # Read left and right q_state from shared arrays
+                # # Read left and right q_state from shared arrays
                 state_data = np.concatenate((np.array(left_hand_state_array[:]), np.array(right_hand_state_array[:])))
+                #print('in state loop')
+                # if not np.all(right_hand_mat == 0.0) and not np.all(left_hand_mat[4] == np.array([-1.13, 0.3, 0.15])): # if hand data has been initialized.
+                #     ref_left_value = left_hand_mat[unitree_tip_indices]
+                #     ref_right_value = right_hand_mat[unitree_tip_indices]
+                #     ref_left_value[0] = ref_left_value[0] * 1.15
+                #     ref_left_value[1] = ref_left_value[1] * 1.05
+                #     ref_left_value[2] = ref_left_value[2] * 0.95
+                #     ref_right_value[0] = ref_right_value[0] * 1.15
+                #     ref_right_value[1] = ref_right_value[1] * 1.05
+                #     ref_right_value[2] = ref_right_value[2] * 0.95
 
-                if not np.all(right_hand_mat == 0.0) and not np.all(left_hand_mat[4] == np.array([-1.13, 0.3, 0.15])): # if hand data has been initialized.
-                    ref_left_value = left_hand_mat[unitree_tip_indices]
-                    ref_right_value = right_hand_mat[unitree_tip_indices]
-                    ref_left_value[0] = ref_left_value[0] * 1.15
-                    ref_left_value[1] = ref_left_value[1] * 1.05
-                    ref_left_value[2] = ref_left_value[2] * 0.95
-                    ref_right_value[0] = ref_right_value[0] * 1.15
-                    ref_right_value[1] = ref_right_value[1] * 1.05
-                    ref_right_value[2] = ref_right_value[2] * 0.95
+                #     left_q_target  = self.hand_retargeting.left_retargeting.retarget(ref_left_value)[self.hand_retargeting.right_dex_retargeting_to_hardware]
+                #     right_q_target = self.hand_retargeting.right_retargeting.retarget(ref_right_value)[self.hand_retargeting.right_dex_retargeting_to_hardware]
 
-                    left_q_target  = self.hand_retargeting.left_retargeting.retarget(ref_left_value)[self.hand_retargeting.right_dex_retargeting_to_hardware]
-                    right_q_target = self.hand_retargeting.right_retargeting.retarget(ref_right_value)[self.hand_retargeting.right_dex_retargeting_to_hardware]
-
-                # get dual hand action
-                action_data = np.concatenate((left_q_target, right_q_target))    
+                # # get dual hand action
+                # action_data = np.concatenate((left_q_target, right_q_target))    
                 if dual_hand_state_array and dual_hand_action_array:
                     with dual_hand_data_lock:
                         dual_hand_state_array[:] = state_data
-                        dual_hand_action_array[:] = action_data
-
-                self.ctrl_dual_hand(left_q_target, right_q_target)
+                
+                # self.ctrl_dual_hand(left_q_target, right_q_target)
                 current_time = time.time()
                 time_elapsed = current_time - start_time
                 sleep_time = max(0, (1 / self.fps) - time_elapsed)

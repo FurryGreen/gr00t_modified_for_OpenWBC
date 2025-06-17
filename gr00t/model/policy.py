@@ -87,7 +87,8 @@ class Gr00tPolicy(BasePolicy):
             # saved in ~/.cache/huggingface/hub/
             model_path = snapshot_download(model_path, repo_type="model")
             # HFValidationError, RepositoryNotFoundError
-        except (HFValidationError, RepositoryNotFoundError):
+        # except (HFValidationError, RepositoryNotFoundError):
+        except:
             print(
                 f"Model not found or avail in the huggingface hub. Loading from local path: {model_path}"
             )

@@ -171,7 +171,7 @@ python image_server.py
 ```
 #### 启动模型server
 ```bash
-python scripts/G1_inference.py --arm=G1_29 --hand=dex3 --model_path <your model path> --goal pick_pink_fox
+python scripts/G1_inference.py --arm=G1_29 --hand=dex3 --model-path our_model --goal pick_pink_fox --frequency 30
 ```
 
 

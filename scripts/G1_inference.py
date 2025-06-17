@@ -30,7 +30,7 @@ import pickle
 import socket
 
 
-
+infer_flag = False
 data_lock = threading.Lock()
 
 def zmq_listener():
@@ -48,6 +48,51 @@ def zmq_listener():
         # 更新共享变量（带锁）
         with data_lock:
             infer_flag = infer_msg
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+def plot_predicted_actions(pred_action_across_time, state_across_time, modality_keys, action_horizon=16, traj_id=0, save_path=None):
+    """
+    绘制预测的动作轨迹。
+
+    Args:
+        pred_action_across_time (np.ndarray): 形状为 (T, D) 的预测动作轨迹，T为时间步数，D为动作维度。
+        modality_keys (list of str): 表示动作模态的键列表。
+        action_horizon (int): 每隔多少步标注一次inference点。
+        traj_id (int): 当前轨迹的编号（用于图标题）。
+        save_path (str or None): 如果提供，将保存图像到此路径，否则只展示图像。
+    """
+    pred_action_across_time = np.array(pred_action_across_time)
+    steps, action_dim = pred_action_across_time.shape
+
+    fig, axes = plt.subplots(nrows=action_dim, ncols=1, figsize=(8, 4 * action_dim))
+    fig.suptitle(f"Trajectory {traj_id} - Modalities: {', '.join(modality_keys)}", fontsize=16, color="blue")
+
+    if action_dim == 1:
+        axes = [axes]  # 保证可迭代性
+
+    for i, ax in enumerate(axes):
+        ax.plot(pred_action_across_time[:, i], label="pred action")
+        count = 0
+        for j in range(0, steps, action_horizon):
+            label = "inference point" if j == 0 else None
+            ax.plot(j, pred_action_across_time[j, i], "ro", label=label)
+        #### 加入state_across_time绘制代码，注意state只在action的inference point处绘制
+            ax.plot(j, state_across_time[count][i], "gx", label="state" if (j == 0) else None)
+            count += 1
+        ######
+        ax.set_title(f"Predicted Action Dimension {i}")
+        ax.legend()
+
+    plt.tight_layout(rect=[0, 0, 1, 0.96])  # 留出 suptitle 空间
+
+    if save_path:
+        plt.savefig(save_path)
+        plt.close()
+    else:
+        plt.show()
+
             
 
 if __name__ == '__main__':
@@ -59,7 +104,7 @@ if __name__ == '__main__':
     parser.add_argument('--no-record', dest = 'record', action = 'store_false', help = 'Do not save data')
     parser.set_defaults(record = False)
 
-    parser.add_argument('--arm', type=str, default = 'G1_29', choices=['G1_29', 'G1_23', 'H1_2', 'H1'], default='G1_29', help='Select arm controller')
+    parser.add_argument('--arm', type=str, default = 'G1_29', choices=['G1_29', 'G1_23', 'H1_2', 'H1'], help='Select arm controller')
     parser.add_argument('--hand', type=str, default = 'dex3', choices=['dex3', 'gripper', 'inspire1'], help='Select hand controller')
     
     
@@ -97,6 +142,9 @@ if __name__ == '__main__':
     print('modality keys:', modality_keys)
     
     arm_keys = ['left_arm', 'right_arm']
+    arm_keys = ['left_arm', 'right_arm', 'left_hand', 'right_hand']#modality_keys
+    arm_keys = ['base_motion', 'right_hand', 'right_arm']
+    #arm_keys = ['left_hand', 'right_hand']
     base_key = ['base_motion']
 
     # image client: img_config should be the same as the configuration in image_server.py (of Robot's development computing unit)
@@ -145,7 +193,7 @@ if __name__ == '__main__':
         img_client = ImageClient(tv_img_shape = tv_img_shape, tv_img_shm_name = tv_img_shm.name, 
                                  wrist_img_shape = wrist_img_shape, wrist_img_shm_name = wrist_img_shm.name)
     else:
-        img_client = ImageClient(tv_img_shape = tv_img_shape, tv_img_shm_name = tv_img_shm.name)
+        img_client = ImageClient(image_show = False,tv_img_shape = tv_img_shape, tv_img_shm_name = tv_img_shm.name)
 
     image_receive_thread = threading.Thread(target = img_client.receive_process, daemon = True)
     image_receive_thread.daemon = True
@@ -191,7 +239,15 @@ if __name__ == '__main__':
             current_flag = True
             policy_start = False
             count = 0
+            num = 0
+            pred_action_across_time = []
+            state_across_time = []
             #### 这里开始可以包装为函数：model_infer_mode
+            if args.hand:  ### hand是从这里发出的，不知有无异步问题
+                left_q_target = np.zeros(7)
+                right_q_target = np.zeros(7)
+                #print('hand out:', left_q_target, right_q_target)
+                hand_ctrl.ctrl_dual_hand(left_q_target, right_q_target)
             while running:
                 
                 if policy_start: #### 第一次先发出
@@ -202,7 +258,6 @@ if __name__ == '__main__':
                     
                 if current_flag:
                     start_time = time.time()                  
-
                     # get current state data.
                     current_lr_arm_q  = arm_ctrl.get_current_dual_arm_q()
                     current_lr_arm_dq = arm_ctrl.get_current_dual_arm_dq()
@@ -215,16 +270,24 @@ if __name__ == '__main__':
                     # dex hand or gripper
                     if args.hand == "dex3":
                         with dual_hand_data_lock:
-                            left_hand_state = dual_hand_state_array[:7]
-                            right_hand_state = dual_hand_state_array[-7:]
+                            left_hand_state = np.array(dual_hand_state_array[:7])
+                            right_hand_state = np.array(dual_hand_state_array[-7:])
 
                     elif args.hand == "gripper":
                         with dual_gripper_data_lock:
                             left_hand_state = [dual_gripper_state_array[1]]
                             right_hand_state = [dual_gripper_state_array[0]]
-
+                    #print('wyx debug:', left_leg_state)
+                    H,W,C = tv_img_array.shape
+                    tv_resized_image = cv2.resize(tv_img_array, (tv_img_shape[1] // 2, tv_img_shape[0] // 2))
+                    cv2.imwrite('Image_Debug.png', tv_resized_image)
+                    #cv2.imshow('Image_Debug', tv_resized_image)
+                    # cv2.waitKey(1)
+                    #img_obs = cv2.cvtColor(copy.deepcopy(tv_img_array), cv2.COLOR_BGR2RGB)
+                    
+                    img_obs = copy.deepcopy(tv_img_array)
                     obs = {
-                        "video.ego_view": copy.deepcopy(tv_img_array), ### important: COPY!!!
+                        "video.ego_view": img_obs.reshape(1, H,W,C), ### important: COPY!!!
                         "state.left_arm": left_arm_state.reshape(1, -1),
                         "state.right_arm": right_arm_state.reshape(1, -1),
                         "state.left_hand": left_hand_state.reshape(1, -1) if args.hand == "dex3" else np.zeros((1, 6)),
@@ -234,10 +297,31 @@ if __name__ == '__main__':
                         "annotation.human.action.task_description": [args.goal],
                     }
                     
-                    ## TODO: 这个action作为函数的return返回给LCMAgent
+                    start_time_p = time.time()
                     action = policy.get_action(obs)
+                    interval = time.time() - start_time_p
+                    print(f"Policy inference time: {interval:.4f} seconds")
 
-                    pred_action_across_time = []
+                    for j in range(16):
+                        # NOTE: concat_pred_action = action[f"action.{modality_keys[0]}"][j]
+                        # the np.atleast_1d is to ensure the action is a 1D array, handle where single value is returned
+                        concat_pred_action = np.concatenate(
+                            [np.atleast_1d(action[f"action.{key}"][j]) for key in arm_keys],
+                            axis=0,
+                        )
+                        pred_action_across_time.append(concat_pred_action)
+                    try:
+                        concat_state = np.concatenate(
+                                [np.atleast_1d(obs[f"state.{key}"][0]) for key in arm_keys],
+                                axis=0,
+                            )
+                    except:
+                        concat_state = np.concatenate(
+                                [np.zeros_like(action[f"action.{key}"][0]) for key in arm_keys],
+                                axis=0,
+                            )
+                    state_across_time.append(concat_state)
+
                     left_arm_action = action['action.left_arm']
                     right_arm_state = action['action.right_arm']
                     arm_sol_q = np.concatenate([left_arm_action, right_arm_state], axis=1)
@@ -254,10 +338,13 @@ if __name__ == '__main__':
                     cmd_json = json.dumps(cmd_dict)  # 转换成 list，再转成 json 字符串
                     zmq_msg = f"{topic} {cmd_json}"
                     socket.send_string(zmq_msg)
-                
+
+                    num += 1
+
                 if args.hand:  ### hand是从这里发出的，不知有无异步问题
                     left_q_target = np.atleast_1d(left_hand_action[count]).flatten()
                     right_q_target = np.atleast_1d(right_hand_action[count]).flatten()
+                    #print('hand out:', left_q_target, right_q_target)
                     hand_ctrl.ctrl_dual_hand(left_q_target, right_q_target)
                     count += 1
                     if count == 16:
@@ -278,6 +365,11 @@ if __name__ == '__main__':
         print("KeyboardInterrupt, exiting program...")
     finally:     
 
+        pred_action_across_time = np.array(pred_action_across_time)[:1000]
+        state_across_time = np.array(state_across_time)[:500]
+        print('debug:', pred_action_across_time.shape)
+        plot_predicted_actions(pred_action_across_time, state_across_time, arm_keys, action_horizon=args.action_horizon, traj_id=0, save_path=os.path.join('predicted_actions.png'))
+        
         tv_img_shm.unlink()
         tv_img_shm.close()
         if WRIST:

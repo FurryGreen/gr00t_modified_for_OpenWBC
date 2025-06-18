@@ -25,6 +25,7 @@ from gr00t.model.policy import Gr00tPolicy
 from inference_deploys.robot_control.robot_arm import G1_29_ArmController, G1_23_ArmController, H1_2_ArmController, H1_ArmController
 from inference_deploys.robot_control.robot_hand_unitree import Dex3_1_Controller, Gripper_Controller
 from inference_deploys.image_server.image_client import ImageClient
+from inference_deploys.robot_control.filter import ActionFilter, MovingAverageFilter, ExponentialMovingAverageFilter, SavitzkyGolayFilter
 
 import pickle
 import socket
@@ -93,14 +94,27 @@ def plot_predicted_actions(pred_action_across_time, state_across_time, modality_
     else:
         plt.show()
 
-            
+def smooth_actions(action_seq: np.ndarray, filter: ActionFilter) -> np.ndarray:
+    """
+    对 action_seq 的最后16个动作进行平滑处理。
+    
+    参数:
+    - action_seq: (T, D) 的动作序列
+    - filter: 实现了 apply() 方法的滤波器对象
+    
+    返回:
+    - (16, D) 的平滑动作序列
+    """
+    assert action_seq.shape[0] >= 16, "动作序列不足16步"
+    return filter.apply(action_seq)[-16:]
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--task_dir', type = str, default = './utils/data', help = 'path to save data')
     parser.add_argument('--frequency', type = int, default = 30.0, help = 'save data\'s frequency')
 
-    parser.add_argument('--record', action = 'store_true', help = 'Save data or not')
+    parser.add_argument('--vis', action = 'store_true', help = 'Save data or not')
     parser.add_argument('--no-record', dest = 'record', action = 'store_false', help = 'Do not save data')
     parser.set_defaults(record = False)
 
@@ -117,6 +131,7 @@ if __name__ == '__main__':
     parser.add_argument('--client', action='store_true', help='Whether to run the client.')
     parser.add_argument('--denoising-steps', type=int, default=4, help='The number of denoising steps to use.')
     parser.add_argument('--action_horizon', type=int, default=16, help='The action horizon for the policy.')
+    parser.add_argument('--filt', action = 'store_true', help = 'add filter')
     
 
     args = parser.parse_args()
@@ -240,8 +255,30 @@ if __name__ == '__main__':
             policy_start = False
             count = 0
             num = 0
-            pred_action_across_time = []
-            state_across_time = []
+            recover_base_motion = None
+            if args.vis:
+                pred_action_across_time = []
+                state_across_time = []
+            if args.filt:
+                act_filter = ExponentialMovingAverageFilter(0.3, length =48)  # 0.9 is the smoothing factor
+                action_seq = {}
+                for key in modality_keys:
+                    action_seq[f'action.{key}'] = None
+
+            init_state = {'left_arm': np.array([-0.28927523,  0.03668371,  0.4204905 ,  0.25827205, -0.04727777,
+                    0.03626331, -0.87588775]), 
+                    'right_arm': np.array([-0.24665932, -0.15940218, -0.26253843,  0.12521118, -0.00215716,
+                    0.02495787,  0.68305868]), 
+                    'left_hand': np.array([-0.8472293 ,  0.7052123 ,  0.0249148 , -0.03309153, -0.01703873,
+                -0.08243784, -0.01271194]), 
+                'right_hand': np.array([-0.79104125, -0.81918585, -0.01530439,  0.02775995,  0.0234479 ,
+                    0.02790572,  0.03036809]), 
+                    'left_leg': np.array([-0.28927523,  0.03668371,  0.4204905 ,  0.25827205, -0.04727777,
+                    0.03626331]), 
+                    'right_leg': np.array([-0.87588775, -0.24665932, -0.15940218, -0.26253843,  0.12521118,
+                -0.00215716]),
+                    'base_motion': np.array([0.0, 0.0, 0.0, 0.74])}
+            
             #### 这里开始可以包装为函数：model_infer_mode
             if args.hand:  ### hand是从这里发出的，不知有无异步问题
                 left_q_target = np.zeros(7)
@@ -277,7 +314,7 @@ if __name__ == '__main__':
                         with dual_gripper_data_lock:
                             left_hand_state = [dual_gripper_state_array[1]]
                             right_hand_state = [dual_gripper_state_array[0]]
-                    #print('wyx debug:', left_leg_state)
+                    # print('wyx debug:', left_hand_state)
                     H,W,C = tv_img_array.shape
                     tv_resized_image = cv2.resize(tv_img_array, (tv_img_shape[1] // 2, tv_img_shape[0] // 2))
                     cv2.imwrite('Image_Debug.png', tv_resized_image)
@@ -286,47 +323,77 @@ if __name__ == '__main__':
                     #img_obs = cv2.cvtColor(copy.deepcopy(tv_img_array), cv2.COLOR_BGR2RGB)
                     
                     img_obs = copy.deepcopy(tv_img_array)
-                    obs = {
-                        "video.ego_view": img_obs.reshape(1, H,W,C), ### important: COPY!!!
-                        "state.left_arm": left_arm_state.reshape(1, -1),
-                        "state.right_arm": right_arm_state.reshape(1, -1),
-                        "state.left_hand": left_hand_state.reshape(1, -1) if args.hand == "dex3" else np.zeros((1, 6)),
-                        "state.right_hand": right_hand_state.reshape(1, -1) if args.hand == "dex3" else np.zeros((1, 6)),
-                        "state.left_leg": left_leg_state.reshape(1, -1),
-                        "state.right_leg": right_leg_state.reshape(1, -1),
-                        "annotation.human.action.task_description": [args.goal],
-                    }
+                    if num == 0:
+                        # 用init state赋值
+                        action = {}
+                        for key in ['left_arm', 'right_arm', 'left_hand', 'right_hand', 'base_motion']:
+                            action[f'action.{key}'] = np.tile(init_state[key], (16, 1))  # 16 steps
+                        print('initialize state')
+                    else:
+                        #    img_obs = np.zeros_like(img_obs)
+                        obs = {
+                            "video.ego_view": img_obs.reshape(1, H,W,C), ### important: COPY!!!
+                            "state.left_arm": left_arm_state.reshape(1, -1),
+                            "state.right_arm": right_arm_state.reshape(1, -1),
+                            "state.left_hand": left_hand_state.reshape(1, -1) if args.hand == "dex3" else np.zeros((1, 6)),
+                            "state.right_hand": right_hand_state.reshape(1, -1) if args.hand == "dex3" else np.zeros((1, 6)),
+                            "state.left_leg": left_leg_state.reshape(1, -1),
+                            "state.right_leg": right_leg_state.reshape(1, -1),
+                            "annotation.human.action.task_description": [args.goal],
+                        }
+                        
+                        start_time_p = time.time()
+                        action = policy.get_action(obs)
+                        interval = time.time() - start_time_p
+                        print(f"Policy inference time: {interval:.4f} seconds")
+
+                        
+                    if args.filt:
+                        smooth_action = {}
+                        for key in modality_keys:
+                            if action_seq[f'action.{key}'] is None:
+                                action_seq[f'action.{key}'] = np.array(action[f'action.{key}'])
+                            else:
+                                action_seq[f'action.{key}'] = np.concatenate([action_seq[f'action.{key}'], np.array(action[f'action.{key}'])], axis=0)
+                            smooth_action[f'action.{key}'] = smooth_actions(action_seq[f'action.{key}'], act_filter)
+                        action = smooth_action
+                        
+                    if args.vis:
+                        for j in range(16):
+                            # NOTE: concat_pred_action = action[f"action.{modality_keys[0]}"][j]
+                            # the np.atleast_1d is to ensure the action is a 1D array, handle where single value is returned
+                            concat_pred_action = np.concatenate(
+                                [np.atleast_1d(action[f"action.{key}"][j]) for key in arm_keys],
+                                axis=0,
+                            )
+                            pred_action_across_time.append(concat_pred_action)
+
+                        stats= []
+                        for key in arm_keys:
+                            try:
+                                stats.append(np.atleast_1d(obs[f"state.{key}"][0]))
+                            except:
+                                stats.append(np.zeros_like(action[f"action.{key}"][0]))
+                        concat_state = np.concatenate(stats, axis=0)
+                        state_across_time.append(concat_state)
                     
-                    start_time_p = time.time()
-                    action = policy.get_action(obs)
-                    interval = time.time() - start_time_p
-                    print(f"Policy inference time: {interval:.4f} seconds")
-
-                    for j in range(16):
-                        # NOTE: concat_pred_action = action[f"action.{modality_keys[0]}"][j]
-                        # the np.atleast_1d is to ensure the action is a 1D array, handle where single value is returned
-                        concat_pred_action = np.concatenate(
-                            [np.atleast_1d(action[f"action.{key}"][j]) for key in arm_keys],
-                            axis=0,
-                        )
-                        pred_action_across_time.append(concat_pred_action)
-                    try:
-                        concat_state = np.concatenate(
-                                [np.atleast_1d(obs[f"state.{key}"][0]) for key in arm_keys],
-                                axis=0,
-                            )
-                    except:
-                        concat_state = np.concatenate(
-                                [np.zeros_like(action[f"action.{key}"][0]) for key in arm_keys],
-                                axis=0,
-                            )
-                    state_across_time.append(concat_state)
-
+                        
                     left_arm_action = action['action.left_arm']
                     right_arm_state = action['action.right_arm']
                     arm_sol_q = np.concatenate([left_arm_action, right_arm_state], axis=1)
                     
-                    base_motion = action['action.base_motion']
+                    base_motion = action['action.base_motion'] if recover_base_motion is None else recover_base_motion
+                    # if np.any(base_motion[:, 3] > 0.6) and num > 400:
+                    #     print("starting recover")
+                    #     start_value = base_motion[15, 3]
+                    #     end_value = 0.74
+                    #     # 生成线性变化的第4列数据
+                    #     new_col4 = np.linspace(start_value, end_value, 16)
+                    #     # 创建新的 base_motion，前三列保持不变或初始化为0
+                    #     recover_base_motion = np.copy(base_motion)
+                    #     recover_base_motion[:, 3] = new_col4
+
+
                     left_hand_action = action['action.left_hand'] if args.hand else np.zeros((16, 6))
                     right_hand_action = action['action.right_hand'] if args.hand else np.zeros((16, 6))
                     
@@ -339,16 +406,24 @@ if __name__ == '__main__':
                     zmq_msg = f"{topic} {cmd_json}"
                     socket.send_string(zmq_msg)
 
-                    num += 1
+                num += 1
 
                 if args.hand:  ### hand是从这里发出的，不知有无异步问题
-                    left_q_target = np.atleast_1d(left_hand_action[count]).flatten()
-                    right_q_target = np.atleast_1d(right_hand_action[count]).flatten()
-                    #print('hand out:', left_q_target, right_q_target)
-                    hand_ctrl.ctrl_dual_hand(left_q_target, right_q_target)
-                    count += 1
-                    if count == 16:
-                        count = 0
+                    if num < 60:
+                        left_q_target = np.zeros(7)
+                        right_q_target = np.zeros(7)
+                        #print('hand out:', left_q_target, right_q_target)
+                        hand_ctrl.ctrl_dual_hand(left_q_target, right_q_target)
+                    else:
+                        if current_flag:
+                            count = 0
+                        left_q_target = np.atleast_1d(left_hand_action[count]).flatten()
+                        right_q_target = np.atleast_1d(right_hand_action[count]).flatten()
+                        #print('hand out:', left_q_target, right_q_target)
+                        hand_ctrl.ctrl_dual_hand(left_q_target, right_q_target)
+                        count += 1
+                        if count > 15:
+                            count = 15
                         
                 current_time = time.time()
                 time_elapsed = current_time - start_time
@@ -364,18 +439,18 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         print("KeyboardInterrupt, exiting program...")
     finally:     
-
-        pred_action_across_time = np.array(pred_action_across_time)[:1000]
-        state_across_time = np.array(state_across_time)[:500]
-        print('debug:', pred_action_across_time.shape)
-        plot_predicted_actions(pred_action_across_time, state_across_time, arm_keys, action_horizon=args.action_horizon, traj_id=0, save_path=os.path.join('predicted_actions.png'))
-        
         tv_img_shm.unlink()
         tv_img_shm.close()
         if WRIST:
             wrist_img_shm.unlink()
             wrist_img_shm.close()
 
+        if args.vis:
+            pred_action_across_time = np.array(pred_action_across_time)[:1500]
+            state_across_time = np.array(state_across_time)[:1500]
+            print('debug:', pred_action_across_time.shape)
+            plot_predicted_actions(pred_action_across_time, state_across_time, arm_keys, action_horizon=args.action_horizon, traj_id=0, save_path=os.path.join('predicted_actions.png'))
+            
         print("Finally, exiting program...")
         exit(0)
         

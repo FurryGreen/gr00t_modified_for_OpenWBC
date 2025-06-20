@@ -135,3 +135,11 @@ our_model/config.json
 our_model/trainer_state.json
 .gitignore
 our_model/experiment_cfg/metadata.json
+pick_pink_fox/config.json
+pick_pink_fox/model-00001-of-00002.safetensors
+pick_pink_fox/model-00002-of-00002.safetensors
+pick_pink_fox/model.safetensors.index.json
+pick_pink_fox/trainer_state.json
+pick_pink_fox/training_args.bin
+pick_pink_fox/experiment_cfg/metadata.json
+models/*

@@ -171,10 +171,10 @@ python image_server.py
 ```
 #### 启动模型server
 ```bash
-python scripts/G1_inference.py --arm=G1_29 --hand=dex3 --model-path our_model --goal pick_mickey_mouse --frequency 20 --vis --filt
+python scripts/G1_inference.py --arm=G1_29 --hand=dex3 --model-path models/multask_pick --goal pick_mickey_mouse --frequency 20 --vis --filt
 ```
 **Note** 顺利运行的关键：1.初始位姿尽可能与遥操数据一致 2.20Hz运行，效果较好
 
-可抓玩偶：1.米奇 2.sloth 3.创智龙 4.大绿鸟 5.linabell 6. orange cat(略难)
+可抓玩偶：1.米奇 2.sloth 3.创智龙(白天未能成功) 4.大绿鸟 5.linabell 6. orange cat(略难)
 
 
